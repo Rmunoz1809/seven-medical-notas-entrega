@@ -1,7 +1,9 @@
 // Arranque: router por hash y repintado en tiempo real
-import { nombreUsuario, EMULADOR } from './fb.js';
+import { db, nombreUsuario, EMULADOR } from './fb.js';
+import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { normTxt } from './comun.js';
 import { datos, suscribir, desuscribir, alCambiar } from './datos.js';
-import { $, $$, esc, toast, abrirModal } from './ui.js';
+import { $, $$, esc, toast, abrirModal, cerrarModal } from './ui.js';
 import { vistaDashboard } from './vistas/dashboard.js';
 import { vistaInventario, vistaItem } from './vistas/inventario.js';
 import { vistaNotas, vistaNE, vistaFormNE } from './vistas/notas.js';
@@ -64,26 +66,49 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#modal').hidden) import('./ui.js').then(u => u.cerrarModal());
 });
 
-// ---- Arranque (sin código de acceso). El nombre solo se usa en el historial.
+// ---- Arranque (sin código de acceso). Los nombres quedan guardados en la base de datos (usuarios/):
+// quien entra elige su nombre de la lista con un toque; este dispositivo además lo recuerda.
 const guardar = (k, v) => { try { localStorage.setItem(k, v); } catch { /* modo privado */ } };
+const claveUsuario = n => normTxt(n).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sin-nombre';
 function pintarUsuario() {
   $('#usuario-nombre').textContent = nombreUsuario() || 'Poner mi nombre';
 }
-function pedirNombre(titulo = 'Tu nombre') {
-  abrirModal(titulo, `<label>Nombre <span class="ayuda">(queda en el historial de movimientos de este dispositivo)</span>
-    <input id="nombre-usuario" value="${esc(nombreUsuario())}" maxlength="60"></label>`, [
-    { texto: 'Guardar', clase: 'btn-primary', accion: () => {
+// Registra (o actualiza) el nombre en la base de datos y lo recuerda en este dispositivo
+async function usarNombre(nombre) {
+  const n = nombre.trim().slice(0, 60);
+  guardar('ne_nombre', n);
+  pintarUsuario();
+  const ref = doc(db, 'usuarios', claveUsuario(n));
+  const previo = await getDoc(ref).catch(() => null);
+  await setDoc(ref, { nombre: n, ultimo_ingreso: serverTimestamp(), ...(previo?.exists() ? {} : { creado_en: serverTimestamp() }) }, { merge: true })
+    .catch(e => console.warn('No se pudo guardar el usuario', e));
+}
+async function pedirNombre(titulo = '¿Quién eres?') {
+  const lista = await getDocs(collection(db, 'usuarios'))
+    .then(s => s.docs.map(d => d.data().nombre).filter(Boolean).sort((a, b) => a.localeCompare(b)))
+    .catch(() => []);
+  const cuerpo = abrirModal(titulo, `
+    ${lista.length ? `<p style="margin-top:0">Elige tu nombre:</p>
+      <div class="sugerencias" style="margin-bottom:16px">${lista.map((n, i) => `<button class="btn" data-usuario="${i}">${esc(n)}</button>`).join('')}</div>` : ''}
+    <label>${lista.length ? '¿No estás en la lista? Escribe tu nombre' : 'Tu nombre'} <span class="ayuda">(queda guardado para la próxima vez)</span>
+      <input id="nombre-usuario" maxlength="60" autocomplete="name"></label>`, [
+    { texto: 'Guardar', clase: 'btn-primary', accion: async () => {
       const n = $('#nombre-usuario').value.trim();
-      if (!n) throw new Error('Escribe tu nombre');
-      guardar('ne_nombre', n.slice(0, 60)); pintarUsuario(); return true;
+      if (!n) throw new Error(lista.length ? 'Elige tu nombre o escríbelo' : 'Escribe tu nombre');
+      await usarNombre(n);
+      return true;
     } },
   ]);
+  $$('[data-usuario]', cuerpo).forEach(b => {
+    b.onclick = async () => { await usarNombre(lista[Number(b.dataset.usuario)]); cerrarModal(); };
+  });
 }
-$('#usuario-nombre').onclick = e => { e.preventDefault(); pedirNombre(); };
+$('#usuario-nombre').onclick = e => { e.preventDefault(); pedirNombre('Cambiar de usuario'); };
 
 $('#app').hidden = false;
 $('#modo-emulador').hidden = !EMULADOR;
 pintarUsuario();
 suscribir(() => render(true));
 render(true);
-if (!nombreUsuario()) pedirNombre('Bienvenido: ¿cómo te llamas?');
+if (!nombreUsuario()) pedirNombre('Bienvenido: ¿quién eres?');
+else usarNombre(nombreUsuario()); // lo registra en la base de datos si venía solo de este dispositivo

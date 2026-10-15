@@ -39,6 +39,12 @@ service cloud.firestore {
       allow update: if nuevo().diff(resource.data).affectedKeys().hasOnly(['firma_pdf']);
     }
     match /movimientos/{id} { allow read, create: if true; }
+    // Nombres de quienes usan la app (se eligen de una lista al entrar)
+    match /usuarios/{id} {
+      allow read: if true;
+      allow create, update: if nuevo().keys().hasOnly(['nombre', 'creado_en', 'ultimo_ingreso'])
+        && nuevo().nombre is string && nuevo().nombre.size() > 0 && nuevo().nombre.size() <= 60;
+    }
     match /archivos/{id} { allow read, create, update: if true; allow delete: if id.matches('.*__[0-9]+'); }
   }
 }

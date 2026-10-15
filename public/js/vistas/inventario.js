@@ -3,7 +3,7 @@ import { datos, item, nota, movimientosDe } from '../datos.js';
 import { ESTADOS, CLAVES_STOCK, validarItem } from '../comun.js';
 import { $, $$, esc, cant, fecha, fechaHora, chip, abrirModal, toast, coincide } from '../ui.js';
 
-const filtro = { categoria: '', estado: '', modelo: '', q: '' };
+const filtro = { categoria: 'Equipo', estado: '', modelo: '', q: '' }; // por defecto se ven los equipos
 
 export function textoUbicacion(it) {
   return (it.ne_abiertas || []).map(id => nota(id)?.numero).filter(Boolean).join(', ');
