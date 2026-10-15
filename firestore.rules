@@ -1,0 +1,44 @@
+rules_version = '2';
+// Reglas compartidas del proyecto seven-medical-st.
+// Mantener IGUALES en "Seven Medical/firestore.rules" y "Seven Medical Notas de Entrega/firestore.rules".
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function autenticado() { return request.auth != null; }
+    function nuevo() { return request.resource.data; }
+
+    // ---- Seven Medical ST (app existente): mismo acceso que antes
+    match /techservice/{doc} { allow read, write: if autenticado(); }
+    match /techservice_pdfs/{doc} { allow read, write: if autenticado(); }
+
+    // ---- Notas de Entrega: abierta para quien tenga el enlace de la página (sin login, a pedido del
+    // dueño). Las reglas impiden borrar documentos y exigen la forma básica de cada registro.
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if doc == 'contadores' && nuevo().keys().hasOnly(['ne', 'nr']);
+    }
+    match /clientes/{id} {
+      allow read: if true;
+      allow create, update: if nuevo().nombre is string && nuevo().nombre.size() > 0 && nuevo().nombre.size() <= 200;
+    }
+    match /items/{id} {
+      allow read: if true;
+      allow create, update: if nuevo().categoria in ['Equipo', 'Accesorio'] && nuevo().stock is map
+        && nuevo().cantidad is int && nuevo().cantidad >= 1;
+    }
+    match /seriales/{id} { allow read, create, delete: if true; }
+    match /notas_entrega/{id} {
+      allow read: if true;
+      allow create: if nuevo().estado == 'Borrador' && nuevo().lineas is list;
+      allow update: if nuevo().estado in ['Borrador', 'Entregada', 'Devuelta parcial', 'Devuelta', 'Anulada']
+        && resource.data.estado != 'Anulada' && nuevo().lineas is list;
+    }
+    match /notas_retiro/{id} {
+      allow read: if true;
+      allow create: if nuevo().ne_id is string && nuevo().lineas is list;
+      // después de emitida solo se puede adjuntar o reemplazar el PDF firmado
+      allow update: if nuevo().diff(resource.data).affectedKeys().hasOnly(['firma_pdf']);
+    }
+    match /movimientos/{id} { allow read, create: if true; }
+    match /archivos/{id} { allow read, create, update: if true; allow delete: if id.matches('.*__[0-9]+'); }
+  }
+}

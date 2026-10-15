@@ -1,0 +1,9 @@
+node_modules
+.DS_Store
+*.log
+.firebase/
+emulador-datos/
+Clientes*.xlsx
+functions/.env*
+.claude/
+firestore-debug.log

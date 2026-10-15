@@ -1,0 +1,9 @@
+{
+  "name": "seven-medical-ne-dev",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "firebase": "^13.0.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}
