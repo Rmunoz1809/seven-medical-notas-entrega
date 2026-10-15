@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notas de Entrega · Seven Medical</title>
+<link rel="icon" href="img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css?v=9cf195a">
+</head>
+<body>
+<div id="app" class="app" hidden>
+  <aside class="sidebar" id="sidebar">
+    <div class="side-logo"><img src="img/logo.png" alt="Seven Medical Company"></div>
+    <nav>
+      <a href="#/dashboard" data-nav="dashboard">Dashboard</a>
+      <a href="#/inventario" data-nav="inventario">Inventario</a>
+      <a href="#/notas" data-nav="notas">Notas de Entrega</a>
+      <a href="#/clientes" data-nav="clientes">Clientes</a>
+    </nav>
+    <div class="side-foot">
+      <div class="muted small">Usuario: <a href="#" id="usuario-nombre"></a></div>
+      <div class="small" id="modo-emulador" hidden>Modo pruebas (emuladores)</div>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="btn btn-ghost menu-btn" id="btn-menu" aria-label="Menú">☰</button>
+      <h1 id="titulo"></h1>
+      <div class="topbar-acciones" id="acciones"></div>
+    </header>
+    <main id="vista" class="vista"></main>
+  </div>
+</div>
+
+<div id="modal" class="modal-fondo" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-cab"><h2 id="modal-titulo"></h2><button class="btn btn-ghost" data-cerrar aria-label="Cerrar">✕</button></div>
+    <div class="modal-cuerpo" id="modal-cuerpo"></div>
+    <div class="modal-pie" id="modal-pie"></div>
+  </div>
+</div>
+<div id="toasts" class="toasts"></div>
+
+<script src="vendor/pdfmake.min.js?v=9cf195a" defer></script>
+<script type="module" src="js/main.js?v=9cf195a"></script>
+</body>
+</html>
