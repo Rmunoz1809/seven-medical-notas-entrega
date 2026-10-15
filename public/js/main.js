@@ -58,10 +58,10 @@ alCambiar(() => render(false));
 
 $('#btn-menu').onclick = () => $('#sidebar').classList.toggle('abierto');
 $('#modal').addEventListener('click', e => {
-  if (e.target.id === 'modal' || e.target.closest('[data-cerrar]')) import('./ui.js').then(u => u.cerrarModal());
+  if (e.target.id === 'modal' || e.target.closest('[data-cerrar]')) cerrarModal();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !$('#modal').hidden) import('./ui.js').then(u => u.cerrarModal());
+  if (e.key === 'Escape' && !$('#modal').hidden) cerrarModal();
 });
 
 // ---- Arranque (sin código de acceso). Los nombres quedan guardados en la base de datos (usuarios/):

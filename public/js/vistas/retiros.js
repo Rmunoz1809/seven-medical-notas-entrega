@@ -14,7 +14,9 @@ export function vistaFormNR(neId, vista) {
     return;
   }
   $('#titulo').textContent = `Registrar retiro · ${n.numero}`;
-  const lineas = n.lineas.filter(l => pendienteLinea(l) > 0);
+  // también las faltantes: si aparecen después, se retiran aquí
+  const afuera = l => pendienteLinea(l) + (l.faltante || 0);
+  const lineas = n.lineas.filter(l => afuera(l) > 0);
   vista.innerHTML = `
     <div class="card card-cuerpo"><div class="form">
       <label>Fecha de retiro *<input type="date" id="nr-fecha" value="${hoyISO()}"></label>
@@ -29,11 +31,11 @@ export function vistaFormNR(neId, vista) {
         <tbody>${lineas.map(l => `<tr data-linea="${esc(l.linea_id)}">
           <td><b>${esc(l.modelo || l.descripcion)}</b><div class="sub-linea">${esc(l.descripcion)}</div></td>
           <td class="nowrap">${esc(l.numero_serie || '—')}</td>
-          <td class="num">${pendienteLinea(l)}</td>
-          <td class="num"><input type="number" min="0" max="${pendienteLinea(l)}" value="0" class="nr-cant" style="width:70px"></td>
+          <td class="num">${afuera(l)}${l.faltante ? `<div class="sub-linea">${l.faltante} faltante</div>` : ''}</td>
+          <td class="num"><input type="number" min="0" max="${afuera(l)}" value="0" class="nr-cant" style="width:70px"></td>
           <td><select class="nr-cond" style="min-width:110px">${CONDICIONES.map(c => `<option>${c}</option>`).join('')}</select></td>
           <td><input class="nr-obs" placeholder="Opcional"></td></tr>`).join('')
-          || '<tr><td colspan="6" class="vacio">No quedan ítems afuera. Los faltantes se resuelven desde la nota de entrega.</td></tr>'}</tbody>
+          || '<tr><td colspan="6" class="vacio">No quedan ítems afuera.</td></tr>'}</tbody>
       </table></div>
     </div>
     <p class="muted small">OK vuelve a "En oficina" · Dañado pasa a "En servicio técnico" · Faltante queda señalado para revisión y no vuelve al inventario disponible. Cuando se retira todo, la nota queda Cerrada.</p>

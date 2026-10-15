@@ -1,7 +1,7 @@
 import { llamar } from '../fb.js';
 import { datos, item, nota, retiro, movimientosDe } from '../datos.js';
 import { ESTADOS, CLAVES_STOCK, validarItem } from '../comun.js';
-import { $, $$, esc, cant, fecha, fechaHora, chip, abrirModal, toast, coincide } from '../ui.js';
+import { $, $$, esc, cant, fecha, fechaHora, hoyISO, chip, abrirModal, toast, coincide } from '../ui.js';
 
 const filtro = { categoria: 'Equipo', estado: '', modelo: '', q: '' }; // por defecto se ven los equipos
 
@@ -105,12 +105,15 @@ export function vistaItem(id, vista) {
   const it = item(id);
   if (!it) { $('#titulo').textContent = 'Ítem'; vista.innerHTML = '<div class="vacio">Ítem no encontrado.</div>'; return; }
   $('#titulo').textContent = `${it.modelo || it.descripcion}${it.numero_serie ? ' · ' + it.numero_serie : ''}`;
-  $('#acciones').innerHTML = '<button class="btn btn-primary" id="btn-editar">Editar</button>';
+  const vendible = ['oficina', 'demostracion', 'servicio'].some(k => (it.stock?.[k] || 0) > 0);
+  $('#acciones').innerHTML = `${vendible ? '<button class="btn" id="btn-vender">Marcar como vendido</button>' : ''}<button class="btn btn-primary" id="btn-editar">Editar</button>`;
   $('#btn-editar').onclick = () => formItem(it);
+  if ($('#btn-vender')) $('#btn-vender').onclick = () => formVenta(it);
   const dato = (e, v) => `<div class="dato"><div class="etq">${e}</div><div class="val">${v || '—'}</div></div>`;
   const abiertas = (it.ne_abiertas || []).map(nota).filter(Boolean);
   vista.innerHTML = `
-    ${it.faltante?.cantidad ? `<div class="aviso aviso-rojo"><b>Faltante:</b> ${it.faltante.cantidad} unidad(es) no regresaron en el retiro de ${esc(it.faltante.ne_numero)}, desde ${fecha(it.faltante.desde)}. Resuélvelo desde <a href="#/ne/${it.faltante.ne_id}">la nota de entrega</a>.</div>` : ''}
+    ${it.faltante?.cantidad ? `<div class="aviso aviso-rojo"><b>Faltante:</b> ${it.faltante.cantidad} unidad(es) no regresaron en el retiro de ${esc(it.faltante.ne_numero)}, desde ${fecha(it.faltante.desde)}. Si aparece, regístralo en el retiro de <a href="#/ne/${it.faltante.ne_id}">la nota de entrega</a>.</div>` : ''}
+    ${it.venta ? `<div class="aviso aviso-verde"><b>Vendido</b> el ${fecha(it.venta.fecha)}${it.venta.cliente ? ` a <b>${esc(it.venta.cliente)}</b>` : ''}${it.venta.con_equipo ? ` junto con <a href="#/item/${it.venta.con_equipo}">${esc(it.venta.con_equipo_texto)}</a>` : ''}${it.venta_accesorios?.length ? `, con: ${esc(it.venta_accesorios.join(', '))}` : ''}.${it.venta.nota ? ` ${esc(it.venta.nota)}` : ''} <span class="muted small">(${esc(it.venta.por)})</span></div>` : ''}
     <div class="card card-cuerpo"><div class="datos">
       ${dato('Estado', chip(it.estado))}
       ${dato('Categoría', esc(it.categoria))}
@@ -128,7 +131,8 @@ export function vistaItem(id, vista) {
   movimientosDe(id).then(movs => {
     const cuerpo = $('#movs');
     if (!cuerpo) return;
-    const enlace = mv => mv.doc_tipo === 'NE' ? `<a href="#/ne/${mv.doc_id}">${esc(mv.doc_numero || 'NE')}</a>`
+    const enlace = mv => mv.doc_tipo === 'NE' && mv.doc_id ? `<a href="#/ne/${mv.doc_id}">${esc(mv.doc_numero || 'NE')}</a>`
+      : mv.doc_numero && !mv.doc_id ? esc(mv.doc_numero)
       : mv.doc_tipo === 'NR' && retiro(mv.doc_id) ? `<a href="#/ne/${retiro(mv.doc_id).ne_id}">${esc(retiro(mv.doc_id).ne_numero)}</a>` : '';
     cuerpo.innerHTML = movs.map(mv => `<tr>
       <td class="nowrap">${fechaHora(mv.fecha)}</td>
@@ -138,4 +142,65 @@ export function vistaItem(id, vista) {
       <td class="small">${mv.estado_anterior ? esc(mv.estado_anterior) + ' → ' : ''}${esc(mv.estado_nuevo)}</td>
       <td class="small ocultar-movil">${esc(mv.usuario)}</td></tr>`).join('') || '<tr><td colspan="6" class="vacio">Sin movimientos.</td></tr>';
   }).catch(e => toast(e.message, 'error'));
+}
+
+// ------------------------------------------------------------ Venta
+// Marca el ítem como vendido. Si es un equipo, se eligen los transductores/accesorios que se venden con él
+// (cualquiera del inventario, con filtro) o se agregan los que no estaban registrados.
+function formVenta(it) {
+  const esEquipo = it.categoria === 'Equipo';
+  const candidatos = datos.items.filter(x => x.id !== it.id && x.categoria === 'Accesorio'
+    && ['oficina', 'demostracion', 'servicio'].some(k => (x.stock?.[k] || 0) > 0));
+  const elegidos = new Set();
+  const nuevos = [];
+  const cuerpo = abrirModal(`Marcar como vendido: ${it.modelo || it.descripcion}${it.numero_serie ? ' · ' + it.numero_serie : ''}`, `
+    <div class="form">
+      <label>Fecha de venta<input type="date" id="vt-fecha" value="${hoyISO()}"></label>
+      <label>Cliente<input id="vt-cliente" list="dl-vt-cli" placeholder="A quién se vendió" autocomplete="off">
+        <datalist id="dl-vt-cli">${datos.clientes.map(c => `<option value="${esc(c.nombre)}">`).join('')}</datalist></label>
+      ${it.cantidad > 1 ? `<label>Cantidad<input id="vt-cant" type="number" min="1" max="${it.cantidad - (it.stock?.vendido || 0) - (it.stock?.baja || 0)}" value="1"></label>` : ''}
+      <label class="full">Nota / factura<input id="vt-nota" placeholder="Opcional"></label>
+    </div>
+    ${esEquipo ? `<h3 style="font-size:14px;margin:18px 0 6px">Transductores y accesorios que se venden con el equipo</h3>
+      <p class="muted small" style="margin:0 0 8px">Marca los del inventario que van incluidos: quedarán como vendidos. Los demás no cambian.</p>
+      <input id="vt-filtro" type="search" placeholder="Filtrar por modelo o serial…" autocomplete="off">
+      <div id="vt-lista" class="lista-simple" style="max-height:240px;overflow-y:auto;margin-top:8px"></div>
+      <h3 style="font-size:14px;margin:16px 0 6px">¿Va uno que no está en el inventario?</h3>
+      <div class="fila-flex"><input id="vt-n-modelo" placeholder="Modelo (ej. L12-4s)"><input id="vt-n-serie" placeholder="Serial (opcional)">
+        <button class="btn btn-sm" id="vt-n-add">+ Agregar</button></div>
+      <div id="vt-nuevos" class="sugerencias"></div>` : ''}`, [
+    { texto: 'Cancelar' },
+    { texto: 'Marcar como vendido', clase: 'btn-primary', accion: async () => {
+      const r = await llamar('marcarVendido', {
+        item_id: it.id, fecha: $('#vt-fecha').value, cliente: $('#vt-cliente').value, nota: $('#vt-nota').value,
+        cantidad: Number($('#vt-cant')?.value || 1), accesorios: [...elegidos], nuevos,
+      });
+      toast(r.vendidos > 1 ? `Vendidos: el equipo y ${r.vendidos - 1} accesorio(s)` : 'Marcado como vendido', 'ok');
+      return true;
+    } },
+  ], { ancho: '720px' });
+  if (!esEquipo) return;
+  const pintar = () => {
+    const q = $('#vt-filtro').value;
+    const lista = candidatos.filter(x => elegidos.has(x.id) || !q || coincide(`${x.modelo} ${x.descripcion} ${x.numero_serie} ${x.serie_norm}`, q));
+    $('#vt-lista').innerHTML = lista.map(x => `<label class="check" style="font-weight:400">
+      <input type="checkbox" data-acc="${x.id}" ${elegidos.has(x.id) ? 'checked' : ''}>
+      <span><b>${esc(x.modelo || x.descripcion)}</b> <span class="muted small">${esc(x.numero_serie || '')} · ${esc(x.estado)}${(x.ne_abiertas || []).length ? ' · ' + esc((x.ne_abiertas || []).map(n => nota(n)?.numero).filter(Boolean).join(', ')) : ''}</span></span></label>`).join('')
+      || '<span class="muted small">No hay transductores disponibles con ese filtro.</span>';
+    $$('[data-acc]', cuerpo).forEach(c => { c.onchange = () => { c.checked ? elegidos.add(c.dataset.acc) : elegidos.delete(c.dataset.acc); }; });
+  };
+  const pintarNuevos = () => {
+    $('#vt-nuevos').innerHTML = nuevos.map((x, i) => `<span class="sug">${esc(x.modelo)} ${x.numero_serie ? `<span class="muted small">${esc(x.numero_serie)}</span>` : ''}
+      <button class="btn btn-sm btn-danger" data-qn="${i}">✕</button></span>`).join('');
+    $$('[data-qn]', cuerpo).forEach(b => { b.onclick = () => { nuevos.splice(Number(b.dataset.qn), 1); pintarNuevos(); }; });
+  };
+  $('#vt-filtro').oninput = pintar;
+  $('#vt-n-add').onclick = () => {
+    const modelo = $('#vt-n-modelo').value.trim();
+    if (!modelo) { toast('Escribe el modelo del transductor', 'error'); return; }
+    nuevos.push({ modelo, numero_serie: $('#vt-n-serie').value.trim(), marca: it.marca || '', descripcion: 'Transductor' });
+    $('#vt-n-modelo').value = ''; $('#vt-n-serie').value = '';
+    pintarNuevos();
+  };
+  pintar();
 }

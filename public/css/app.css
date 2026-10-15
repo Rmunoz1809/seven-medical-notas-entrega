@@ -153,3 +153,4 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-w
   .modal-fondo { padding: 16px 8px; }
   .ocultar-movil { display: none; }
 }
+.aviso-verde { background: var(--verde-bg); color: var(--verde); }

@@ -294,7 +294,8 @@ export function crearOperaciones(fs, db) {
       for (const p of pedidas) {
         const l = porLinea[p.linea_id];
         if (!l) throw fallo('Una línea del retiro no pertenece a esta nota de entrega.');
-        if (Number(p.cantidad) > pendienteLinea(l)) throw fallo(`${etiquetaItem(l)}: solo quedan ${pendienteLinea(l)} pendientes de retorno.`);
+        const max = p.condicion === 'Faltante' ? pendienteLinea(l) : pendienteLinea(l) + (l.faltante || 0);
+        if (Number(p.cantidad) > max) throw fallo(`${etiquetaItem(l)}: solo quedan ${max} afuera.`);
       }
       const items = await leerItems(tx, pedidas.map(p => porLinea[p.linea_id].item_id));
       const seq = (cont.nr || 0) + 1;
@@ -306,6 +307,14 @@ export function crearOperaciones(fs, db) {
         const it = items[l.item_id];
         const antes = it.estado;
         const n = Number(p.cantidad);
+        if (p.condicion !== 'Faltante') {
+          // primero lo pendiente; si regresa algo marcado como faltante, deja de estarlo
+          const deFaltante = Math.max(0, n - pendienteLinea(l));
+          if (deFaltante) {
+            l.faltante -= deFaltante;
+            if (it.faltante?.ne_id === neId) it.faltante = it.faltante.cantidad - deFaltante > 0 ? { ...it.faltante, cantidad: it.faltante.cantidad - deFaltante } : null;
+          }
+        }
         if (p.condicion === 'OK') { moverStock(it, 'demostracion', 'oficina', n); l.devuelto_ok += n; }
         else if (p.condicion === 'Dañado') { moverStock(it, 'demostracion', 'servicio', n); l.devuelto_danado += n; }
         else {
@@ -374,49 +383,97 @@ export function crearOperaciones(fs, db) {
     });
   }
 
-  // Ítem faltante que aparece, o ítem que el cliente compró / se perdió
-  async function resolverAfuera(d) {
+  // ------------------------------------------------------------ Venta
+  // Marca un equipo (o accesorio) como vendido, junto con los transductores que se venden con él.
+  // Sale de donde esté: si está afuera en una NE, cierra esa línea de la NE; si no, de oficina o servicio técnico.
+  // "nuevos": accesorios que no estaban en el inventario; se crean ya como vendidos para que quede el registro.
+  async function marcarVendido(d) {
     const quien = quienEs(d);
-    const neId = String(d.ne_id || '');
-    const accion = d.accion;
-    const n = Number(d.cantidad || 1);
-    const motivo = String(d.motivo || '').trim();
-    if (!['aparecio', 'vendido', 'baja'].includes(accion)) throw fallo('Acción inválida.');
-    if (!Number.isInteger(n) || n < 1) throw fallo('Cantidad inválida.');
+    const principal = String(d.item_id || '');
+    const fechaVenta = d.fecha || new Date().toISOString().slice(0, 10);
+    if (!fechaValida(fechaVenta)) throw fallo('Fecha de venta inválida.');
+    const cliente = String(d.cliente || '').trim().slice(0, 200);
+    const nota = String(d.nota || '').trim().slice(0, 500);
+    const cantPrincipal = Number(d.cantidad || 1);
+    if (!Number.isInteger(cantPrincipal) || cantPrincipal < 1) throw fallo('Cantidad inválida.');
+    const acc = [...new Set((d.accesorios || []).map(String))].filter(id => id !== principal);
+    const nuevos = (d.nuevos || []).map(x => validarItem({ categoria: 'Accesorio', marca: x.marca, modelo: x.modelo,
+      descripcion: x.descripcion || 'Transductor', numero_serie: x.numero_serie, cantidad: 1 }));
+    const errNuevos = nuevos.flatMap(v => v.errores);
+    if (errNuevos.length) throw fallo('Transductor nuevo: ' + errNuevos.join('. '));
     return runTransaction(db, async tx => {
-      const refNE = ref('notas_entrega', neId);
-      const s = await tx.get(refNE);
-      if (!s.exists()) throw fallo('La nota no existe.');
-      const ne = s.data();
-      if (!['Entregada', 'Devuelta parcial'].includes(ne.estado)) throw fallo(`La nota está ${ne.estado}.`);
-      const lineas = ne.lineas.map(l => ({ ...l }));
-      const l = lineas.find(x => x.linea_id === d.linea_id);
-      if (!l) throw fallo('Línea no encontrada.');
-      const items = await leerItems(tx, [l.item_id]);
-      const it = items[l.item_id];
-      const antes = it.estado;
-      const faltante = l.faltante || 0;
-      if (accion === 'aparecio') {
-        if (faltante < n) throw fallo('Esa cantidad no está marcada como faltante.');
-        l.faltante -= n; l.devuelto_ok += n;
-        moverStock(it, 'demostracion', 'oficina', n);
-      } else {
-        if (faltante + pendienteLinea(l) < n) throw fallo('No hay tantas unidades afuera en esta línea.');
-        l.faltante -= Math.min(faltante, n);
-        l.cerrado_sin_retorno = (l.cerrado_sin_retorno || 0) + n;
-        moverStock(it, 'demostracion', accion, n);
+      const items = await leerItems(tx, [principal, ...acc]);
+      const serialesNuevos = await Promise.all(nuevos.filter(v => v.item.serie_norm).map(v => tx.get(refSerial(v.item.serie_norm))));
+      const dup = serialesNuevos.find(sn => sn.exists());
+      if (dup) throw fallo(`Ya existe en el inventario un ítem con el serial ${decodeURIComponent(dup.id)}: márcalo desde la lista.`);
+      // NE donde están afuera los ítems que se venden
+      const neIds = [...new Set(Object.values(items).filter(it => it.stock.demostracion > 0).flatMap(it => it.ne_abiertas || []))];
+      const nes = {};
+      for (const id of neIds) {
+        const sn = await tx.get(ref('notas_entrega', id));
+        if (sn.exists()) nes[id] = { ...sn.data(), lineas: sn.data().lineas.map(l => ({ ...l })) };
       }
-      if (it.faltante?.ne_id === neId) {
-        const resta = l.faltante || 0;
-        it.faltante = resta > 0 ? { ...it.faltante, cantidad: resta } : null;
+      const pc = items[principal];
+      const docEquipo = `${pc.modelo || pc.descripcion}${pc.numero_serie ? ' SN ' + pc.numero_serie : ''}`;
+      const venta = (extra = {}) => ({ fecha: fechaVenta, cliente, nota, por: quien, ...extra });
+      const nombresAcc = [];
+
+      const vender = (it, n, esAccesorio) => {
+        const antes = it.estado;
+        let restante = n;
+        let neNumero = null;
+        // 1) afuera en una NE: se cierra la línea como vendida al cliente
+        for (const neId of it.ne_abiertas || []) {
+          const ne = nes[neId];
+          if (!ne || !restante) continue;
+          for (const l of ne.lineas.filter(x => x.item_id === it.id)) {
+            const afuera = pendienteLinea(l) + (l.faltante || 0);
+            const k = Math.min(afuera, restante, it.stock.demostracion);
+            if (!k) continue;
+            const deFaltante = Math.max(0, k - pendienteLinea(l));
+            l.faltante -= deFaltante;
+            l.cerrado_sin_retorno = (l.cerrado_sin_retorno || 0) + k;
+            moverStock(it, 'demostracion', 'vendido', k);
+            if (it.faltante?.ne_id === neId) it.faltante = it.faltante.cantidad - deFaltante > 0 ? { ...it.faltante, cantidad: it.faltante.cantidad - deFaltante } : null;
+            restante -= k;
+            neNumero = ne.numero;
+            ne.tocada = true;
+          }
+          actualizarAbiertas(it, neId, ne.lineas);
+        }
+        // 2) en oficina o en servicio técnico
+        for (const de of ['oficina', 'servicio']) {
+          const k = Math.min(restante, it.stock[de]);
+          if (k) { moverStock(it, de, 'vendido', k); restante -= k; }
+        }
+        if (restante > 0) throw fallo(`${etiquetaItem(it)}: no hay ${n} unidad(es) disponibles para vender (${it.estado}).`);
+        it.venta = venta(esAccesorio ? { con_equipo: principal, con_equipo_texto: docEquipo } : {});
+        escribirItem(tx, it, quien);
+        movimiento(tx, { item_id: it.id, tipo: 'Venta', usuario: quien, cantidad: n, estado_anterior: antes, estado_nuevo: it.estado,
+          doc_tipo: neNumero ? 'NE' : null, doc_id: null, doc_numero: neNumero,
+          nota: [cliente && `Cliente: ${cliente}`, esAccesorio && `Con ${docEquipo}`, nota].filter(Boolean).join(' · ') });
+      };
+
+      for (const id of acc) { vender(items[id], 1, true); nombresAcc.push(etiquetaItem(items[id])); }
+      for (const { item } of nuevos) {
+        const r = ref('items');
+        const stock = { ...stockVacio(), vendido: 1 };
+        tx.set(r, { ...item, stock, estado: ESTADOS.vendido, faltante: null, ne_abiertas: [],
+          venta: venta({ con_equipo: principal, con_equipo_texto: docEquipo }),
+          creado_en: serverTimestamp(), creado_por: quien, actualizado_en: serverTimestamp(), actualizado_por: quien });
+        if (item.serie_norm) tx.set(refSerial(item.serie_norm), { item_id: r.id });
+        movimiento(tx, { item_id: r.id, tipo: 'Venta', usuario: quien, cantidad: 1, estado_anterior: null, estado_nuevo: ESTADOS.vendido,
+          nota: ['Agregado al vender', cliente && `Cliente: ${cliente}`, `Con ${docEquipo}`].filter(Boolean).join(' · ') });
+        nombresAcc.push(etiquetaItem(item));
       }
-      actualizarAbiertas(it, neId, lineas);
-      escribirItem(tx, it, quien);
-      const texto = { aparecio: 'Apareció → En oficina', vendido: 'Vendido al cliente', baja: 'Dado de baja' }[accion];
-      movimiento(tx, { item_id: it.id, tipo: 'Resolución', usuario: quien, cantidad: n, estado_anterior: antes,
-        estado_nuevo: it.estado, doc_tipo: 'NE', doc_id: neId, doc_numero: ne.numero, nota: [texto, motivo].filter(Boolean).join(': ') });
-      tx.update(refNE, { lineas, estado: estadoNE(lineas), actualizado_en: serverTimestamp(), actualizado_por: quien });
-      return { ok: true };
+      // el equipo principal guarda con qué se vendió
+      pc.venta_accesorios = nombresAcc;
+      vender(pc, cantPrincipal, false);
+      for (const [id, ne] of Object.entries(nes)) {
+        if (!ne.tocada) continue;
+        tx.update(ref('notas_entrega', id), { lineas: ne.lineas, estado: estadoNE(ne.lineas), actualizado_en: serverTimestamp(), actualizado_por: quien });
+      }
+      return { ok: true, vendidos: 1 + acc.length + nuevos.length };
     });
   }
 
@@ -448,5 +505,5 @@ export function crearOperaciones(fs, db) {
     return { ok: true };
   }
 
-  return { guardarItem, importarItems, guardarNE, emitirNE, emitirNR, anularNE, resolverAfuera, subirFirmaNE };
+  return { guardarItem, importarItems, guardarNE, emitirNE, emitirNR, anularNE, marcarVendido, subirFirmaNE };
 }

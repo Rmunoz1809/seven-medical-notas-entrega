@@ -70,6 +70,16 @@ export function vistaNE(id, vista) {
       ${n.emitido_por ? dato('Emitida por', esc(n.emitido_por)) : ''}
       ${n.motivo ? `<div class="dato" style="grid-column:1/-1"><div class="etq">Motivo / notas</div><div class="val">${esc(n.motivo)}</div></div>` : ''}
     </div></div>
+    ${n.numero && n.estado !== 'Anulada' ? `<div class="card"><div class="card-cab"><h2>PDF firmado</h2>${n.firma_pdf ? chip('Firmada', 'verde') : chip('Pendiente de firma', 'amarillo')}</div>
+      <div class="card-cuerpo">
+        ${n.firma_pdf ? `<p style="margin-top:0">${esc(n.firma_pdf.nombre)} · ${(n.firma_pdf.tamano / 1048576).toFixed(1)} MB · subido por ${esc(n.firma_pdf.subido_por)} ${fechaHora(n.firma_pdf.subido_en)}</p>`
+          : '<p style="margin-top:0" class="muted">Descarga el PDF, hazlo firmar y súbelo aquí escaneado (máximo 6 MB).</p>'}
+        <div class="fila-flex">
+          ${n.firma_pdf ? '<button class="btn" id="firma-ver">Ver PDF firmado</button><button class="btn" id="firma-bajar">Descargar</button>' : ''}
+          <label class="btn ${n.firma_pdf ? '' : 'btn-primary'}" style="flex-direction:row">${n.firma_pdf ? 'Reemplazar PDF firmado' : 'Subir PDF firmado'}
+            <input type="file" id="firma-archivo" accept="application/pdf,.pdf" hidden></label>
+        </div>
+      </div></div>` : ''}
     <div class="card"><div class="card-cab"><h2>Artículos</h2><span class="muted small">${totalUnidades} unidad(es)</span></div>
       <div class="tabla-wrap"><table>
         <thead><tr><th>#</th><th>Artículo</th><th>Serial</th><th class="num">Cant.</th>${n.numero ? '<th>Situación</th>' : ''}</tr></thead>
@@ -81,16 +91,6 @@ export function vistaNE(id, vista) {
           ${n.numero ? `<td>${situacion(n, l)}</td>` : ''}</tr>`).join('')}</tbody>
         <tfoot><tr><td colspan="3">Total</td><td class="num">${totalUnidades}</td>${n.numero ? '<td></td>' : ''}</tr></tfoot>
       </table></div></div>
-    ${n.numero && n.estado !== 'Anulada' ? `<div class="card"><div class="card-cab"><h2>PDF firmado</h2>${n.firma_pdf ? chip('Firmada', 'verde') : chip('Pendiente de firma', 'amarillo')}</div>
-      <div class="card-cuerpo">
-        ${n.firma_pdf ? `<p style="margin-top:0">${esc(n.firma_pdf.nombre)} · ${(n.firma_pdf.tamano / 1048576).toFixed(1)} MB · subido por ${esc(n.firma_pdf.subido_por)} ${fechaHora(n.firma_pdf.subido_en)}</p>`
-          : '<p style="margin-top:0" class="muted">Descarga el PDF, hazlo firmar y súbelo aquí escaneado (máximo 6 MB).</p>'}
-        <div class="fila-flex">
-          ${n.firma_pdf ? '<button class="btn" id="firma-ver">Ver PDF firmado</button><button class="btn" id="firma-bajar">Descargar</button>' : ''}
-          <label class="btn ${n.firma_pdf ? '' : 'btn-primary'}" style="flex-direction:row">${n.firma_pdf ? 'Reemplazar PDF firmado' : 'Subir PDF firmado'}
-            <input type="file" id="firma-archivo" accept="application/pdf,.pdf" hidden></label>
-        </div>
-      </div></div>` : ''}
     ${retiros.length ? `<div class="card"><div class="card-cab"><h2>Retiros</h2></div><div class="tabla-wrap"><table>
       <thead><tr><th>Fecha</th><th>Retiró / recibió</th><th>Qué se retiró y en qué condición</th></tr></thead><tbody>
       ${retiros.map(r => `<tr><td class="nowrap">${fecha(r.fecha_retiro)}</td><td>${esc(r.persona)}</td>
@@ -111,7 +111,6 @@ export function vistaNE(id, vista) {
     if (!motivo) return;
     await conBoton(null, async () => { await llamar('anularNE', { id: n.id, motivo }); toast('Nota anulada', 'ok'); });
   };
-  $$('[data-resolver]', vista).forEach(b => { b.onclick = () => resolver(n, b.dataset.resolver); });
 }
 
 function situacion(n, l) {
@@ -120,33 +119,9 @@ function situacion(n, l) {
   if (l.devuelto_ok) partes.push(chip(`${l.cantidad > 1 ? l.devuelto_ok + ' ' : ''}Retirado OK`, 'verde'));
   if (l.devuelto_danado) partes.push(chip(`${l.cantidad > 1 ? l.devuelto_danado + ' ' : ''}Retirado dañado`, 'naranja'));
   if (l.faltante) partes.push(chip(`${l.cantidad > 1 ? l.faltante + ' ' : ''}Faltante`, 'rojo'));
-  if (l.cerrado_sin_retorno) partes.push(chip(`${l.cerrado_sin_retorno} vendido/baja`, 'gris'));
+  if (l.cerrado_sin_retorno) partes.push(chip(`${l.cantidad > 1 ? l.cerrado_sin_retorno + ' ' : ''}Vendido`, 'gris'));
   if (pend && n.estado !== 'Anulada') partes.push(chip(`${l.cantidad > 1 ? pend + ' ' : ''}Afuera`, 'azul'));
-  const resolvible = ABIERTAS.includes(n.estado) && (pend > 0 || l.faltante > 0);
-  return partes.join(' ') + (resolvible ? ` <button class="btn btn-sm" data-resolver="${l.linea_id}">Resolver</button>` : '');
-}
-
-function resolver(n, lineaId) {
-  const l = n.lineas.find(x => x.linea_id === lineaId);
-  const ops = [];
-  if (l.faltante) ops.push(['aparecio', 'Apareció → vuelve a oficina']);
-  ops.push(['vendido', 'El cliente lo compró → Vendido'], ['baja', 'Perdido / dar de baja']);
-  const max = l.faltante + pendienteLinea(l);
-  abrirModal('Resolver ítem afuera', `<p style="margin-top:0"><b>${esc(l.modelo || l.descripcion)}</b> ${esc(l.numero_serie || '')}</p>
-    <div class="form">
-      <label class="full">Acción<select id="rs-acc">${ops.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></label>
-      ${max > 1 ? `<label>Cantidad<input id="rs-cant" type="number" min="1" max="${max}" value="1"></label>` : ''}
-      <label class="full">Motivo / detalle<textarea id="rs-mot"></textarea></label>
-    </div>
-    <p class="muted small">Para equipos que regresan normalmente usa "Registrar retiro".</p>`, [
-    { texto: 'Cancelar' },
-    { texto: 'Guardar', clase: 'btn-primary', accion: async () => {
-      await llamar('resolverAfuera', { ne_id: n.id, linea_id: lineaId, accion: $('#rs-acc').value,
-        cantidad: Number($('#rs-cant')?.value || 1), motivo: $('#rs-mot').value });
-      toast('Listo', 'ok');
-      return true;
-    } },
-  ]);
+  return partes.join(' ');
 }
 
 // ------------------------------------------------------------ PDF firmado de la NE

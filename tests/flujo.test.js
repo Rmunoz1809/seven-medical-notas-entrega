@@ -85,7 +85,7 @@ test('retiro parcial → Devuelta parcial; Dañado → servicio; Faltante marcad
   assert.deepEqual([t.stock.oficina, t.stock.demostracion], [2, 1]);
   // no se puede devolver más de lo pendiente
   await fallaCon(f('emitirNR')({ ne_id: id, fecha_retiro: '2026-10-11', persona: 'J', lineas: [
-    { linea_id: L[0].linea_id, cantidad: 1, condicion: 'OK' }] }), /pendientes/);
+    { linea_id: L[0].linea_id, cantidad: 1, condicion: 'OK' }] }), /solo quedan 0 afuera/);
 
   await f('emitirNR')({ ne_id: id, fecha_retiro: '2026-10-12', persona: 'Jorge', lineas: [
     { linea_id: L[2].linea_id, cantidad: 1, condicion: 'Faltante' },
@@ -97,14 +97,15 @@ test('retiro parcial → Devuelta parcial; Dañado → servicio; Faltante marcad
   assert.equal((await ne(id)).estado, 'Devuelta parcial', 'con faltante la NE sigue abierta');
   // con NR no se puede anular
   await fallaCon(f('anularNE')({ id, motivo: 'error' }), /retiros registrados/);
-  await f('resolverAfuera')({ ne_id: id, linea_id: L[2].linea_id, accion: 'aparecio', cantidad: 1 });
+  // el faltante aparece después: se registra en un retiro normal
+  await f('emitirNR')({ ne_id: id, fecha_retiro: '2026-10-13', persona: 'Jorge', lineas: [{ linea_id: L[2].linea_id, cantidad: 1, condicion: 'OK' }] });
   assert.equal((await ne(id)).estado, 'Devuelta');
   const capFin = await item(ids[2]);
   assert.equal(capFin.estado, 'En oficina');
   assert.equal(capFin.faltante, null);
   assert.deepEqual(capFin.ne_abiertas, []);
   const movs = await getDocs(query(collection(db, 'movimientos'), where('item_id', '==', ids[2])));
-  assert.deepEqual(movs.docs.map(d => d.data().tipo).sort(), ['Alta', 'Resolución', 'Retiro', 'Salida NE']);
+  assert.deepEqual(movs.docs.map(d => d.data().tipo).sort(), ['Alta', 'Retiro', 'Retiro', 'Salida NE']);
 });
 
 test('PDF firmado de la NE: solo PDF y queda registrado', async () => {
@@ -122,6 +123,29 @@ test('PDF firmado de la NE: solo PDF y queda registrado', async () => {
   const meta = (await getDoc(doc(db, 'archivos', `ne_${id}`))).data();
   const partes = await Promise.all(Array.from({ length: meta.n }, (_, i) => getDoc(doc(db, 'archivos', `ne_${id}__${i}`))));
   assert.equal(partes.map(p => p.data().d).join(''), pdf);
+});
+
+test('venta: equipo con sus transductores (de oficina, de una NE y uno nuevo)', async () => {
+  const { id: eq } = await f('guardarItem')({ ...base, modelo: 'Consona N9', numero_serie: 'NN9-66000269' });
+  const { id: t1 } = await f('guardarItem')({ ...base, categoria: 'Accesorio', modelo: 'V11-3H', numero_serie: 'KS4Y65117478' });
+  const { id: t2 } = await f('guardarItem')({ ...base, categoria: 'Accesorio', modelo: 'SC5-1N', numero_serie: 'RF3E65051466' });
+  const { id: libre } = await f('guardarItem')({ ...base, categoria: 'Accesorio', modelo: 'SD8-1', numero_serie: 'LM6V64043421' });
+  // el equipo y un transductor están afuera en demostración
+  const { id: neId } = await f('guardarNE')(datosNE([{ item_id: eq, cantidad: 1 }, { item_id: t1, cantidad: 1 }]));
+  await f('emitirNE')({ id: neId });
+  await f('marcarVendido')({ item_id: eq, accesorios: [t1, t2], cliente: 'Clínica X', fecha: '2026-10-16',
+    nuevos: [{ modelo: 'L12-4s', numero_serie: 'NUEVO-123' }] });
+  for (const id of [eq, t1, t2]) assert.equal((await item(id)).estado, 'Vendido');
+  assert.equal((await item(libre)).estado, 'En oficina', 'el que no se eligió queda igual');
+  assert.equal((await item(eq)).venta.cliente, 'Clínica X');
+  assert.deepEqual((await item(eq)).venta_accesorios.length, 3);
+  assert.equal((await item(t2)).venta.con_equipo, eq);
+  const nota = await ne(neId);
+  assert.equal(nota.estado, 'Devuelta', 'la NE se cierra porque todo quedó vendido');
+  assert.deepEqual(nota.lineas.map(l => l.cerrado_sin_retorno), [1, 1]);
+  const nuevo = (await getDocs(query(collection(db, 'items'), where('serie_norm', '==', 'NUEVO-123')))).docs[0].data();
+  assert.equal(nuevo.estado, 'Vendido');
+  await fallaCon(f('marcarVendido')({ item_id: eq }), /no hay 1 unidad/);
 });
 
 test('anular NE sin NR devuelve el stock; borrador anulado no numera', async () => {
