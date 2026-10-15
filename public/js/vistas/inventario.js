@@ -1,5 +1,5 @@
 import { llamar } from '../fb.js';
-import { datos, item, nota, movimientosDe } from '../datos.js';
+import { datos, item, nota, retiro, movimientosDe } from '../datos.js';
 import { ESTADOS, CLAVES_STOCK, validarItem } from '../comun.js';
 import { $, $$, esc, cant, fecha, fechaHora, chip, abrirModal, toast, coincide } from '../ui.js';
 
@@ -110,7 +110,7 @@ export function vistaItem(id, vista) {
   const dato = (e, v) => `<div class="dato"><div class="etq">${e}</div><div class="val">${v || '—'}</div></div>`;
   const abiertas = (it.ne_abiertas || []).map(nota).filter(Boolean);
   vista.innerHTML = `
-    ${it.faltante?.cantidad ? `<div class="aviso aviso-rojo"><b>Faltante:</b> ${it.faltante.cantidad} unidad(es) no regresaron en ${esc(it.faltante.nr_numero)} (${esc(it.faltante.ne_numero)}), desde ${fecha(it.faltante.desde)}. Resuélvelo desde <a href="#/ne/${it.faltante.ne_id}">la nota de entrega</a>.</div>` : ''}
+    ${it.faltante?.cantidad ? `<div class="aviso aviso-rojo"><b>Faltante:</b> ${it.faltante.cantidad} unidad(es) no regresaron en el retiro de ${esc(it.faltante.ne_numero)}, desde ${fecha(it.faltante.desde)}. Resuélvelo desde <a href="#/ne/${it.faltante.ne_id}">la nota de entrega</a>.</div>` : ''}
     <div class="card card-cuerpo"><div class="datos">
       ${dato('Estado', chip(it.estado))}
       ${dato('Categoría', esc(it.categoria))}
@@ -129,10 +129,10 @@ export function vistaItem(id, vista) {
     const cuerpo = $('#movs');
     if (!cuerpo) return;
     const enlace = mv => mv.doc_tipo === 'NE' ? `<a href="#/ne/${mv.doc_id}">${esc(mv.doc_numero || 'NE')}</a>`
-      : mv.doc_tipo === 'NR' ? `<a href="#/nr/${mv.doc_id}">${esc(mv.doc_numero)}</a>` : '';
+      : mv.doc_tipo === 'NR' && retiro(mv.doc_id) ? `<a href="#/ne/${retiro(mv.doc_id).ne_id}">${esc(retiro(mv.doc_id).ne_numero)}</a>` : '';
     cuerpo.innerHTML = movs.map(mv => `<tr>
       <td class="nowrap">${fechaHora(mv.fecha)}</td>
-      <td>${esc(mv.tipo)}${mv.condicion ? ' ' + chip(mv.condicion) : ''}${mv.nota ? `<div class="sub-linea">${esc(mv.nota)}</div>` : ''}</td>
+      <td>${esc(mv.tipo === 'Retorno NR' ? 'Retiro' : mv.tipo)}${mv.condicion ? ' ' + chip(mv.condicion) : ''}${mv.nota ? `<div class="sub-linea">${esc(mv.nota)}</div>` : ''}</td>
       <td class="nowrap">${enlace(mv)}</td>
       <td class="num">${mv.cantidad || ''}</td>
       <td class="small">${mv.estado_anterior ? esc(mv.estado_anterior) + ' → ' : ''}${esc(mv.estado_nuevo)}</td>

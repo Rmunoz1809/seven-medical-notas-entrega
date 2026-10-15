@@ -59,7 +59,7 @@ test('emisión concurrente: el mismo ítem solo sale en una NE', async () => {
   await fallaCon(f('guardarNE')(datosNE([{ item_id: eq, cantidad: 1 }])), /no está en oficina/);
 });
 
-test('NR parcial → Devuelta parcial; Dañado → servicio; Faltante marcado; final → Devuelta', async () => {
+test('retiro parcial → Devuelta parcial; Dañado → servicio; Faltante marcado; final → Devuelta', async () => {
   const ids = [];
   for (const [modelo, sn] of [['L13-3m', 'BR8S53084303'], ['C5-2m', 'BR7R53139827'], ['Air Capsule', 'NA7C58002754']]) {
     ids.push((await f('guardarItem')({ ...base, categoria: 'Accesorio', modelo, numero_serie: sn, compatibles: 'MX6 3P' })).id);
@@ -96,7 +96,7 @@ test('NR parcial → Devuelta parcial; Dañado → servicio; Faltante marcado; f
   assert.equal(cap.faltante.cantidad, 1);
   assert.equal((await ne(id)).estado, 'Devuelta parcial', 'con faltante la NE sigue abierta');
   // con NR no se puede anular
-  await fallaCon(f('anularNE')({ id, motivo: 'error' }), /notas de retiro/);
+  await fallaCon(f('anularNE')({ id, motivo: 'error' }), /retiros registrados/);
   await f('resolverAfuera')({ ne_id: id, linea_id: L[2].linea_id, accion: 'aparecio', cantidad: 1 });
   assert.equal((await ne(id)).estado, 'Devuelta');
   const capFin = await item(ids[2]);
@@ -104,22 +104,23 @@ test('NR parcial → Devuelta parcial; Dañado → servicio; Faltante marcado; f
   assert.equal(capFin.faltante, null);
   assert.deepEqual(capFin.ne_abiertas, []);
   const movs = await getDocs(query(collection(db, 'movimientos'), where('item_id', '==', ids[2])));
-  assert.deepEqual(movs.docs.map(d => d.data().tipo).sort(), ['Alta', 'Resolución', 'Retorno NR', 'Salida NE']);
+  assert.deepEqual(movs.docs.map(d => d.data().tipo).sort(), ['Alta', 'Resolución', 'Retiro', 'Salida NE']);
 });
 
-test('PDF firmado de la NR: solo PDF y queda registrado', async () => {
+test('PDF firmado de la NE: solo PDF y queda registrado', async () => {
   const { id: eq } = await f('guardarItem')({ ...base, modelo: 'MX3', numero_serie: 'SQ6-66002716' });
   const { id } = await f('guardarNE')(datosNE([{ item_id: eq, cantidad: 1 }]));
   await f('emitirNE')({ id });
   const L = (await ne(id)).lineas;
   const nr = await f('emitirNR')({ ne_id: id, fecha_retiro: '2026-10-15', persona: 'Jorge', lineas: [{ linea_id: L[0].linea_id, cantidad: 1, condicion: 'OK' }] });
-  await fallaCon(f('subirFirmaNR')({ nr_id: nr.id, nombre: 'x.pdf', pdf_b64: Buffer.from('hola').toString('base64') }), /debe ser un PDF/);
+  await fallaCon(f('subirFirmaNE')({ ne_id: id, nombre: 'x.pdf', pdf_b64: Buffer.from('hola').toString('base64') }), /debe ser un PDF/);
   const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(1_500_000, 65)]).toString('base64'); // > 1 trozo
-  await f('subirFirmaNR')({ nr_id: nr.id, nombre: 'NR firmada.pdf', pdf_b64: pdf });
-  const doc1 = (await getDoc(doc(db, 'notas_retiro', nr.id))).data();
-  assert.equal(doc1.firma_pdf.nombre, 'NR firmada.pdf');
-  const meta = (await getDoc(doc(db, 'archivos', `nr_${nr.id}`))).data();
-  const partes = await Promise.all(Array.from({ length: meta.n }, (_, i) => getDoc(doc(db, 'archivos', `nr_${nr.id}__${i}`))));
+  await f('subirFirmaNE')({ ne_id: id, nombre: 'NE firmada.pdf', pdf_b64: pdf });
+  const doc1 = (await getDoc(doc(db, 'notas_entrega', id))).data();
+  assert.equal(doc1.firma_pdf.nombre, 'NE firmada.pdf');
+  assert.equal(doc1.estado, 'Devuelta');
+  const meta = (await getDoc(doc(db, 'archivos', `ne_${id}`))).data();
+  const partes = await Promise.all(Array.from({ length: meta.n }, (_, i) => getDoc(doc(db, 'archivos', `ne_${id}__${i}`))));
   assert.equal(partes.map(p => p.data().d).join(''), pdf);
 });
 

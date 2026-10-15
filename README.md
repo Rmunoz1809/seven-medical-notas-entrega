@@ -10,8 +10,8 @@ Inventario de equipos de demostración (Mindray) y Notas de Entrega / Retiro con
 
 ## Funciones
 - Inventario por número de serie (equipos y accesorios/transductores con sus modelos compatibles) e historial por ítem.
-- Nota de Entrega: borrador → emitir (número correlativo; los ítems pasan a "En demostración") → PDF.
-- Nota de Retiro: OK vuelve a oficina, Dañado a servicio técnico, Faltante queda señalado. Se sube el PDF firmado.
+- Nota de Entrega: borrador → emitir (número correlativo; los ítems pasan a "En demostración") → PDF → se sube el PDF firmado.
+- Retiro dentro de la misma NE: qué se retira y en qué condición (OK vuelve a oficina, Dañado a servicio técnico, Faltante queda señalado). La NE queda Abierta mientras haya algo afuera y Cerrada al retirarse todo.
 - Anular una NE solo si no tiene retiros. Nada se borra.
 
 ## Probar en local (emulador, sin tocar producción)

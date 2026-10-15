@@ -38,6 +38,7 @@ const CHIP_ESTADO = {
   [ESTADOS.oficina]: 'verde', [ESTADOS.demostracion]: 'azul', [ESTADOS.servicio]: 'naranja',
   [ESTADOS.vendido]: 'gris', [ESTADOS.baja]: 'gris', Mixto: 'amarillo',
   Borrador: 'gris', Entregada: 'azul', 'Devuelta parcial': 'amarillo', Devuelta: 'verde', Anulada: 'rojo', Emitida: 'verde',
+  Abierta: 'azul', Cerrada: 'verde',
   OK: 'verde', 'Dañado': 'naranja', Faltante: 'rojo',
 };
 export const chip = (texto, color) => `<span class="chip chip-${color || CHIP_ESTADO[texto] || 'gris'}">${esc(texto)}</span>`;

@@ -137,9 +137,28 @@ function entregar(dd, r, nombre, modo) {
   }));
 }
 
+// Registro de retiros dentro de la NE: qué se retiró, cuándo, quién y en qué condición
+function bloqueRetiros(retiros) {
+  if (!retiros.length) return [];
+  const filas = retiros.flatMap(r => r.lineas.map(l => [
+    { text: fecha(r.fecha_retiro), fontSize: 9 },
+    { stack: [{ text: l.descripcion || l.modelo, fontSize: 9 }, l.numero_serie ? { text: `SN: ${l.numero_serie}`, fontSize: 8, color: GRIS2 } : null,
+      l.observacion ? { text: `Obs.: ${l.observacion}`, fontSize: 8, italics: true, color: GRIS2 } : null].filter(Boolean) },
+    { text: dec(l.cantidad), fontSize: 9, alignment: 'right' },
+    { text: l.condicion, fontSize: 9 },
+    { text: r.persona, fontSize: 9 },
+  ]));
+  return [
+    { text: 'Retiro', fontSize: 10, margin: [0, 26, 0, 6] },
+    { table: { headerRows: 1, widths: [62, '*', 34, 52, 100],
+      body: [['Fecha', 'Artículo', 'Cant.', 'Condición', 'Retiró / recibió'].map((t, i) => ({ text: t, color: '#ffffff', fillColor: '#5b5b5b', fontSize: 8.5, alignment: i === 2 ? 'right' : 'left' })), ...filas] },
+      layout: { hLineWidth: (i) => (i < 2 ? 0 : 0.6), vLineWidth: () => 0, hLineColor: () => LINEA, paddingTop: () => 4, paddingBottom: () => 4 } },
+  ];
+}
+
 const archivo = s => s.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() + '.pdf';
 
-export async function pdfNE(n, modo = 'ver') {
+export async function pdfNE(n, modo = 'ver', retiros = []) {
   const r = await cargarRecursos();
   const total = n.lineas.reduce((s, l) => s + l.cantidad, 0);
   const contenido = [
@@ -157,31 +176,9 @@ export async function pdfNE(n, modo = 'ver') {
     ] },
     { text: 'Notas', fontSize: 10, margin: [0, 30, 0, 6] },
     { text: n.motivo || ' ', fontSize: 9, color: GRIS },
+    ...bloqueRetiros(retiros),
     firmas('Firma autorizada', 'Recibido por'),
   ];
   const dd = documento(r, contenido, { borrador: !n.numero });
   return entregar(dd, r, archivo(`${n.numero || 'Borrador'} Nota de Entrega ${n.cliente?.nombre || ''}`), modo);
-}
-
-export async function pdfNR(nr, modo = 'ver') {
-  const r = await cargarRecursos();
-  const total = nr.lineas.reduce((s, l) => s + l.cantidad, 0);
-  const contenido = [
-    cabecera(r, 'NOTA DE RETIRO', nr.numero),
-    bloqueCliente(nr.cliente, nr.direccion, [
-      ['Fecha :', fecha(nr.fecha_retiro)],
-      ['Ref. Nota de Entrega :', nr.ne_numero],
-      ['Retira / recibe :', nr.persona],
-    ]),
-    { text: `Por medio del presente documento hacemos constar el retiro de los siguientes artículos, entregados en calidad de demostración mediante la Nota de Entrega ${nr.ne_numero}:`,
-      fontSize: 11, margin: [0, 22, 0, 0] },
-    tablaArticulos(nr.lineas, { extraCol: { titulo: 'Condición', valor: l => l.condicion } }),
-    { columns: [
-      { text: [{ text: 'Artículos en total ', color: '#000' }, { text: dec(total), color: GRIS2 }], fontSize: 9, margin: [2, 6, 0, 0] },
-    ] },
-    { text: 'Notas', fontSize: 10, margin: [0, 30, 0, 6] },
-    { text: nr.notas || ' ', fontSize: 9, color: GRIS },
-    firmas('Entregado por (cliente)', 'Recibido por Seven Medical'),
-  ];
-  return entregar(documento(r, contenido, { borrador: false }), r, archivo(`${nr.numero} Nota de Retiro ${nr.cliente?.nombre || ''}`), modo);
 }

@@ -1,7 +1,8 @@
-import { llamar } from '../fb.js';
+import { llamar, db } from '../fb.js';
+import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { datos, item, nota, cliente, retiro } from '../datos.js';
-import { pendienteLinea, ESTADOS_NE } from '../comun.js';
-import { $, $$, esc, fecha, chip, abrirModal, toast, confirmar, conBoton, autocompletar, coincide, hoyISO, sumarDias, diasEntre } from '../ui.js';
+import { pendienteLinea, ESTADO_VISIBLE } from '../comun.js';
+import { $, $$, esc, fecha, fechaHora, chip, abrirModal, toast, confirmar, conBoton, autocompletar, coincide, hoyISO, sumarDias, diasEntre } from '../ui.js';
 import { vencida, ABIERTAS } from './dashboard.js';
 import { formCliente } from './clientes.js';
 import { pdfNE } from '../pdf.js';
@@ -11,7 +12,7 @@ const filtro = { estado: 'Abiertas', q: '' };
 export function vistaNotas(_, vista) {
   $('#titulo').textContent = 'Notas de Entrega';
   $('#acciones').innerHTML = '<a class="btn btn-primary" href="#/ne/nueva">+ Nueva NE</a>';
-  const estados = ['Abiertas', 'Todas', ...ESTADOS_NE];
+  const estados = ['Abiertas', 'Cerradas', 'Borradores', 'Anuladas', 'Todas'];
   vista.innerHTML = `<div class="card">
     <div class="filtros">
       <input type="search" id="f-q" placeholder="Buscar número, cliente o serial" value="${esc(filtro.q)}">
@@ -22,7 +23,7 @@ export function vistaNotas(_, vista) {
       <tbody id="ne-filas"></tbody></table></div></div>`;
   const pintar = () => {
     const lista = datos.notas.filter(n =>
-      (filtro.estado === 'Todas' || (filtro.estado === 'Abiertas' ? [...ABIERTAS, 'Borrador'].includes(n.estado) : n.estado === filtro.estado))
+      (filtro.estado === 'Todas' || filtro.estado.slice(0, -1) === ESTADO_VISIBLE[n.estado] || (filtro.estado === 'Borradores' && n.estado === 'Borrador'))
       && (!filtro.q || coincide(`${n.numero} ${n.cliente?.nombre} ${n.direccion} ${n.lineas.map(l => l.numero_serie).join(' ')}`, filtro.q)));
     $('#ne-filas').innerHTML = lista.map(n => `<tr class="click ${vencida(n) ? 'vencida' : ''}" onclick="location.hash='#/ne/${n.id}'">
       <td class="nowrap"><b>${esc(n.numero || 'Borrador')}</b></td>
@@ -30,7 +31,7 @@ export function vistaNotas(_, vista) {
       <td class="nowrap">${fecha(n.fecha_entrega)}</td>
       <td class="nowrap">${fecha(n.fecha_retorno_estimada)}${vencida(n) ? '<div>' + chip('Vencida', 'rojo') + '</div>' : ''}</td>
       <td class="num ocultar-movil">${n.lineas.reduce((t, l) => t + l.cantidad, 0)}</td>
-      <td>${chip(n.estado)}</td></tr>`).join('') || '<tr><td colspan="6" class="vacio">No hay notas con ese filtro.</td></tr>';
+      <td>${chip(ESTADO_VISIBLE[n.estado])}${n.firma_pdf ? ' <span class="muted small">✓ firmada</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="vacio">No hay notas con ese filtro.</td></tr>';
   };
   $('#f-q').oninput = e => { filtro.q = e.target.value; pintar(); };
   $('#f-est').onchange = e => { filtro.estado = e.target.value; pintar(); };
@@ -60,7 +61,7 @@ export function vistaNE(id, vista) {
     ${n.estado === 'Anulada' ? `<div class="aviso aviso-rojo"><b>Anulada</b> por ${esc(n.anulacion?.por)}: ${esc(n.anulacion?.motivo)}</div>` : ''}
     ${n.estado === 'Borrador' ? '<div class="aviso aviso-azul">Borrador: todavía no descuenta inventario ni tiene número. Al emitirla, los ítems pasan a "En demostración".</div>' : ''}
     <div class="card card-cuerpo"><div class="datos">
-      ${dato('Estado', chip(n.estado))}
+      ${dato('Estado', chip(ESTADO_VISIBLE[n.estado]) + (n.estado === 'Devuelta parcial' ? '<div class="sub-linea">Retiro parcial: quedan ítems afuera</div>' : ''))}
       ${dato('Cliente', `${esc(n.cliente?.nombre)}${n.cliente?.contacto ? `<div class="sub-linea">${esc(n.cliente.contacto)} ${esc(n.cliente.telefono)}</div>` : ''}`)}
       ${dato('Dirección / lugar', esc(n.direccion))}
       ${dato('Entrega', fecha(n.fecha_entrega))}
@@ -80,14 +81,28 @@ export function vistaNE(id, vista) {
           ${n.numero ? `<td>${situacion(n, l)}</td>` : ''}</tr>`).join('')}</tbody>
         <tfoot><tr><td colspan="3">Total</td><td class="num">${totalUnidades}</td>${n.numero ? '<td></td>' : ''}</tr></tfoot>
       </table></div></div>
-    ${retiros.length ? `<div class="card"><div class="card-cab"><h2>Notas de retiro</h2></div><div class="tabla-wrap"><table><tbody>
-      ${retiros.map(r => `<tr class="click" onclick="location.hash='#/nr/${r.id}'"><td><b>${esc(r.numero)}</b></td><td>${fecha(r.fecha_retiro)}</td><td>${esc(r.persona)}</td>
-        <td>${r.lineas.map(l => chip(`${l.cantidad} ${l.condicion}`, { OK: 'verde', 'Dañado': 'naranja', Faltante: 'rojo' }[l.condicion])).join(' ')}</td>
-        <td>${r.firma_pdf ? chip('Firmada', 'verde') : chip('Sin firmar', 'amarillo')}</td></tr>`).join('')}
+    ${n.numero && n.estado !== 'Anulada' ? `<div class="card"><div class="card-cab"><h2>PDF firmado</h2>${n.firma_pdf ? chip('Firmada', 'verde') : chip('Pendiente de firma', 'amarillo')}</div>
+      <div class="card-cuerpo">
+        ${n.firma_pdf ? `<p style="margin-top:0">${esc(n.firma_pdf.nombre)} · ${(n.firma_pdf.tamano / 1048576).toFixed(1)} MB · subido por ${esc(n.firma_pdf.subido_por)} ${fechaHora(n.firma_pdf.subido_en)}</p>`
+          : '<p style="margin-top:0" class="muted">Descarga el PDF, hazlo firmar y súbelo aquí escaneado (máximo 6 MB).</p>'}
+        <div class="fila-flex">
+          ${n.firma_pdf ? '<button class="btn" id="firma-ver">Ver PDF firmado</button><button class="btn" id="firma-bajar">Descargar</button>' : ''}
+          <label class="btn ${n.firma_pdf ? '' : 'btn-primary'}" style="flex-direction:row">${n.firma_pdf ? 'Reemplazar PDF firmado' : 'Subir PDF firmado'}
+            <input type="file" id="firma-archivo" accept="application/pdf,.pdf" hidden></label>
+        </div>
+      </div></div>` : ''}
+    ${retiros.length ? `<div class="card"><div class="card-cab"><h2>Retiros</h2></div><div class="tabla-wrap"><table>
+      <thead><tr><th>Fecha</th><th>Retiró / recibió</th><th>Qué se retiró y en qué condición</th></tr></thead><tbody>
+      ${retiros.map(r => `<tr><td class="nowrap">${fecha(r.fecha_retiro)}</td><td>${esc(r.persona)}</td>
+        <td>${r.lineas.map(l => `<div>${chip(l.condicion)} ${esc(l.modelo || l.descripcion)}${l.numero_serie ? ` <span class="muted small">SN ${esc(l.numero_serie)}</span>` : ''}${l.cantidad > 1 ? ` ×${l.cantidad}` : ''}${l.observacion ? ` <span class="muted small">— ${esc(l.observacion)}</span>` : ''}</div>`).join('')}
+          ${r.notas ? `<div class="sub-linea">${esc(r.notas)}</div>` : ''}</td></tr>`).join('')}
     </tbody></table></div></div>` : ''}`;
 
-  $('#btn-pdf').onclick = () => pdfNE(n).catch(e => toast(e.message, 'error'));
-  $('#btn-pdf-d').onclick = () => pdfNE(n, 'descargar').catch(e => toast(e.message, 'error'));
+  $('#btn-pdf').onclick = () => pdfNE(n, 'ver', retiros).catch(e => toast(e.message, 'error'));
+  $('#btn-pdf-d').onclick = () => pdfNE(n, 'descargar', retiros).catch(e => toast(e.message, 'error'));
+  if ($('#firma-archivo')) $('#firma-archivo').onchange = e => subirFirma(n, e.target);
+  if ($('#firma-ver')) $('#firma-ver').onclick = e => conBoton(e.target, () => abrirFirma(n, false));
+  if ($('#firma-bajar')) $('#firma-bajar').onclick = e => conBoton(e.target, () => abrirFirma(n, true));
   if ($('#btn-emitir')) $('#btn-emitir').onclick = e => emitir(n, e.target);
   if ($('#btn-anular')) $('#btn-anular').onclick = async () => {
     const motivo = await confirmar('Anular nota de entrega',
@@ -102,11 +117,11 @@ export function vistaNE(id, vista) {
 function situacion(n, l) {
   const partes = [];
   const pend = pendienteLinea(l);
-  if (l.devuelto_ok) partes.push(chip(`${l.devuelto_ok} devuelto OK`, 'verde'));
-  if (l.devuelto_danado) partes.push(chip(`${l.devuelto_danado} dañado`, 'naranja'));
-  if (l.faltante) partes.push(chip(`${l.faltante} faltante`, 'rojo'));
+  if (l.devuelto_ok) partes.push(chip(`${l.cantidad > 1 ? l.devuelto_ok + ' ' : ''}Retirado OK`, 'verde'));
+  if (l.devuelto_danado) partes.push(chip(`${l.cantidad > 1 ? l.devuelto_danado + ' ' : ''}Retirado dañado`, 'naranja'));
+  if (l.faltante) partes.push(chip(`${l.cantidad > 1 ? l.faltante + ' ' : ''}Faltante`, 'rojo'));
   if (l.cerrado_sin_retorno) partes.push(chip(`${l.cerrado_sin_retorno} vendido/baja`, 'gris'));
-  if (pend && n.estado !== 'Anulada') partes.push(chip(`${pend} afuera`, 'azul'));
+  if (pend && n.estado !== 'Anulada') partes.push(chip(`${l.cantidad > 1 ? pend + ' ' : ''}Afuera`, 'azul'));
   const resolvible = ABIERTAS.includes(n.estado) && (pend > 0 || l.faltante > 0);
   return partes.join(' ') + (resolvible ? ` <button class="btn btn-sm" data-resolver="${l.linea_id}">Resolver</button>` : '');
 }
@@ -132,6 +147,40 @@ function resolver(n, lineaId) {
       return true;
     } },
   ]);
+}
+
+// ------------------------------------------------------------ PDF firmado de la NE
+const MAX_MB = 6;
+function subirFirma(n, input) {
+  const archivo = input.files[0];
+  input.value = '';
+  if (!archivo) return;
+  if (!(archivo.type === 'application/pdf' || /\.pdf$/i.test(archivo.name))) { toast('El archivo debe ser un PDF', 'error'); return; }
+  if (archivo.size > MAX_MB * 1048576) { toast(`El PDF pesa ${(archivo.size / 1048576).toFixed(1)} MB; máximo ${MAX_MB} MB.`, 'error'); return; }
+  toast('Subiendo PDF firmado…');
+  conBoton(null, () => new Promise((ok, mal) => {
+    const lector = new FileReader();
+    lector.onerror = () => mal(new Error('No se pudo leer el archivo'));
+    lector.onload = () => llamar('subirFirmaNE', { ne_id: n.id, nombre: archivo.name, pdf_b64: lector.result })
+      .then(() => { toast('PDF firmado guardado', 'ok'); ok(); }, mal);
+    lector.readAsDataURL(archivo);
+  }));
+}
+
+// Une los trozos guardados en Firestore y abre o descarga el PDF firmado
+async function abrirFirma(n, descargar) {
+  const clave = `ne_${n.id}`;
+  const meta = await getDoc(doc(db, 'archivos', clave));
+  if (!meta.exists()) throw new Error('No se encontró el PDF firmado');
+  const partes = await Promise.all(Array.from({ length: meta.data().n }, (_, i) => getDoc(doc(db, 'archivos', `${clave}__${i}`))));
+  const bin = atob(partes.map(p => p.data().d).join(''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  if (descargar || !window.open(url, '_blank')) {
+    const a = document.createElement('a'); a.href = url; a.download = `${n.numero} firmada.pdf`; a.click();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
 }
 
 async function emitir(n, boton) {

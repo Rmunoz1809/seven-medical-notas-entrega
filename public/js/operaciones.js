@@ -320,7 +320,7 @@ export function crearOperaciones(fs, db) {
           linea_id: l.linea_id, item_id: l.item_id, categoria: l.categoria, marca: l.marca, modelo: l.modelo,
           descripcion: l.descripcion, numero_serie: l.numero_serie, cantidad: n, condicion: p.condicion, observacion,
         });
-        movimiento(tx, { item_id: it.id, tipo: 'Retorno NR', usuario: quien, cantidad: n, condicion: p.condicion,
+        movimiento(tx, { item_id: it.id, tipo: 'Retiro', usuario: quien, cantidad: n, condicion: p.condicion,
           estado_anterior: antes, estado_nuevo: it.estado, doc_tipo: 'NR', doc_id: refNR.id, doc_numero: numero,
           nota: [ne.numero, observacion].filter(Boolean).join(' · ') });
       }
@@ -351,7 +351,7 @@ export function crearOperaciones(fs, db) {
       if (!s.exists()) throw fallo('La nota no existe.');
       const ne = s.data();
       if (ne.estado === 'Anulada') throw fallo('La nota ya está anulada.');
-      if ((ne.nr_ids || []).length) throw fallo('No se puede anular: la nota tiene notas de retiro asociadas.');
+      if ((ne.nr_ids || []).length) throw fallo('No se puede anular: la nota ya tiene retiros registrados.');
       if (!['Borrador', 'Entregada'].includes(ne.estado)) throw fallo(`No se puede anular una nota ${ne.estado}.`);
       if (ne.lineas.some(l => (l.cerrado_sin_retorno || 0) > 0 || (l.faltante || 0) > 0)) {
         throw fallo('No se puede anular: hay ítems ya resueltos (vendidos, de baja o faltantes).');
@@ -420,20 +420,22 @@ export function crearOperaciones(fs, db) {
     });
   }
 
-  // ------------------------------------------------------------ PDF firmado de la Nota de Retiro
+  // ------------------------------------------------------------ PDF firmado de la Nota de Entrega
   // Se guarda en Firestore en trozos (cada documento < 1 MB), igual que en Seven Medical ST.
-  async function subirFirmaNR(d) {
+  async function subirFirmaNE(d) {
     const quien = quienEs(d);
-    const nrId = String(d.nr_id || '');
+    const neId = String(d.ne_id || '');
     const b64 = String(d.pdf_b64 || '').replace(/^data:[^,]*,/, '');
     const nombre = String(d.nombre || 'firmado.pdf').slice(0, 120);
     if (!b64) throw fallo('Falta el archivo.');
     if (atob(b64.slice(0, 8)).slice(0, 5) !== '%PDF-') throw fallo('El archivo debe ser un PDF.');
     const tamano = Math.floor(b64.length * 3 / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
     if (tamano > MAX_PDF_MB * 1024 * 1024) throw fallo(`El PDF pesa más de ${MAX_PDF_MB} MB.`);
-    const refNR = ref('notas_retiro', nrId);
-    if (!(await getDoc(refNR)).exists()) throw fallo('La nota de retiro no existe.');
-    const clave = `nr_${nrId}`;
+    const refNE = ref('notas_entrega', neId);
+    const ne = await getDoc(refNE);
+    if (!ne.exists()) throw fallo('La nota de entrega no existe.');
+    if (!ne.data().numero || ne.data().estado === 'Anulada') throw fallo('Solo se adjunta el PDF firmado a una nota emitida.');
+    const clave = `ne_${neId}`;
     const previo = await getDoc(ref('archivos', clave));
     const n = Math.ceil(b64.length / TROZO);
     const lote = writeBatch(db);
@@ -441,10 +443,10 @@ export function crearOperaciones(fs, db) {
     for (let i = n; i < (previo.exists() ? previo.data().n : 0); i++) lote.delete(ref('archivos', `${clave}__${i}`));
     const info = { nombre, tamano, subido_en: serverTimestamp(), subido_por: quien };
     lote.set(ref('archivos', clave), { n, ...info });
-    lote.update(refNR, { firma_pdf: info });
+    lote.update(refNE, { firma_pdf: info });
     await lote.commit();
     return { ok: true };
   }
 
-  return { guardarItem, importarItems, guardarNE, emitirNE, emitirNR, anularNE, resolverAfuera, subirFirmaNR };
+  return { guardarItem, importarItems, guardarNE, emitirNE, emitirNR, anularNE, resolverAfuera, subirFirmaNE };
 }

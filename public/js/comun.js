@@ -11,7 +11,8 @@ export const ESTADOS = {
   baja: 'Baja',
 };
 export const CLAVES_STOCK = Object.keys(ESTADOS);
-export const ESTADOS_NE = ['Borrador', 'Entregada', 'Devuelta parcial', 'Devuelta', 'Anulada'];
+// Cómo se muestra el estado de una NE: abierta mientras haya algo afuera, cerrada al retirarse todo
+export const ESTADO_VISIBLE = { Borrador: 'Borrador', Entregada: 'Abierta', 'Devuelta parcial': 'Abierta', Devuelta: 'Cerrada', Anulada: 'Anulada' };
 
 export function stockVacio() {
   return { oficina: 0, demostracion: 0, servicio: 0, vendido: 0, baja: 0 };

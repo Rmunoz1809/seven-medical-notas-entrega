@@ -7,7 +7,7 @@ import { $, $$, esc, toast, abrirModal, cerrarModal } from './ui.js';
 import { vistaDashboard } from './vistas/dashboard.js';
 import { vistaInventario, vistaItem } from './vistas/inventario.js';
 import { vistaNotas, vistaNE, vistaFormNE } from './vistas/notas.js';
-import { vistaFormNR, vistaRetiros, vistaNR } from './vistas/retiros.js';
+import { vistaFormNR } from './vistas/retiros.js';
 import { vistaClientes } from './vistas/clientes.js';
 
 const RUTAS = [
@@ -19,8 +19,6 @@ const RUTAS = [
   [/^ne\/([\w-]+)\/editar$/, vistaFormNE, 'notas'],
   [/^ne\/([\w-]+)\/retiro$/, vistaFormNR, 'notas'],
   [/^ne\/([\w-]+)$/, vistaNE, 'notas'],
-  [/^retiros$/, vistaRetiros, 'retiros'],
-  [/^nr\/([\w-]+)$/, vistaNR, 'retiros'],
   [/^clientes$/, vistaClientes, 'clientes'],
 ];
 

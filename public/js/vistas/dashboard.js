@@ -57,7 +57,7 @@ export function vistaDashboard(_, vista) {
       ${faltantes.map(it => `<tr class="click" onclick="location.hash='#/item/${it.id}'">
         <td>${esc(it.modelo || it.descripcion)}<div class="sub-linea">${esc(it.descripcion)}</div></td>
         <td>${esc(it.numero_serie || '—')}</td><td class="num">${it.faltante.cantidad}</td>
-        <td>${esc(it.faltante.ne_numero)} · ${esc(it.faltante.nr_numero)}</td><td>${fecha(it.faltante.desde)}</td></tr>`).join('')}
+        <td>${esc(it.faltante.ne_numero)}</td><td>${fecha(it.faltante.desde)}</td></tr>`).join('')}
       </tbody></table></div></div>` : ''}
     ${borradores.length ? `<div class="card">
       <div class="card-cab"><h2>Borradores sin emitir</h2></div>
