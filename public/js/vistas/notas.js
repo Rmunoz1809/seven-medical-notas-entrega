@@ -185,9 +185,15 @@ export function vistaFormNE(id, vista) {
     <div class="card">
       <div class="card-cab"><h2>Artículos</h2><span class="muted small" id="ne-total"></span></div>
       <div class="card-cuerpo">
-        <label>Agregar ítem disponible (en oficina)<input id="ne-buscar" placeholder="Buscar por modelo, serial o descripción…" autocomplete="off"></label>
-        <div id="ne-sug"></div>
+        <h3 style="font-size:13px;margin:0 0 8px">Disponibles en oficina <span class="muted small">— agrega cualquier equipo o transductor</span></h3>
+        <div class="fila-flex">
+          <input id="ne-buscar" type="search" placeholder="Filtrar por modelo, serial o descripción…" autocomplete="off">
+          <select id="ne-cat" style="flex:0 1 170px"><option value="">Todo</option><option>Equipo</option><option value="Accesorio">Accesorios / transductores</option></select>
+        </div>
       </div>
+      <div class="tabla-wrap" style="max-height:340px;overflow-y:auto;border-bottom:1px solid var(--border)"><table>
+        <thead><tr><th>Disponible</th><th>Serial</th><th></th></tr></thead><tbody id="ne-disp"></tbody></table></div>
+      <div class="card-cuerpo" style="padding-bottom:4px"><h3 style="font-size:13px;margin:0">En esta nota</h3></div>
       <div class="tabla-wrap"><table><thead><tr><th>Artículo</th><th>Serial</th><th class="num">Cant.</th><th></th></tr></thead>
         <tbody id="ne-lineas"></tbody></table></div>
     </div>
@@ -199,7 +205,7 @@ export function vistaFormNE(id, vista) {
 
   const disponibles = () => datos.items.filter(it => (it.stock?.oficina || 0) > 0);
   const enNota = id2 => f.lineas.find(l => l.item_id === id2);
-  let sugeridos = [];
+  let visibles = [];
 
   const pintarLineas = () => {
     $('#ne-lineas').innerHTML = f.lineas.map((l, i) => {
@@ -214,20 +220,24 @@ export function vistaFormNE(id, vista) {
         <td><button class="btn btn-sm btn-danger" data-quitar="${i}" aria-label="Quitar">✕</button></td></tr>`;
     }).join('') || '<tr><td colspan="4" class="vacio">Agrega los equipos y accesorios que salen.</td></tr>';
     $('#ne-total').textContent = `${f.lineas.reduce((s, l) => s + l.cantidad, 0)} unidad(es)`;
-    $$('[data-quitar]').forEach(b => { b.onclick = () => { f.lineas.splice(Number(b.dataset.quitar), 1); pintarLineas(); pintarSugerencias(); }; });
+    $$('[data-quitar]').forEach(b => { b.onclick = () => { f.lineas.splice(Number(b.dataset.quitar), 1); pintarLineas(); pintarDisponibles(); }; });
     $$('[data-cant]').forEach(inp => { inp.onchange = () => { f.lineas[Number(inp.dataset.cant)].cantidad = Math.max(1, Number(inp.value) || 1); pintarLineas(); }; });
   };
 
-  // Regla 6: al agregar un equipo, sugiere sus accesorios compatibles disponibles (sin agregarlos)
-  const pintarSugerencias = () => {
-    const claves = new Set(f.lineas.map(l => item(l.item_id)).filter(it => it?.categoria === 'Equipo').map(it => it.modelo_clave));
-    sugeridos = disponibles().filter(it => it.categoria === 'Accesorio' && !enNota(it.id)
-      && (it.compatibles || []).some(k => claves.has(k)));
-    $('#ne-sug').innerHTML = sugeridos.length ? `<div class="aviso aviso-azul" style="margin:12px 0 0">
-      <b>Accesorios compatibles disponibles</b> — agrega solo los que salen:
-      <div class="sugerencias">${sugeridos.map((it, i) => `<span class="sug">${esc(it.modelo || it.descripcion)} <span class="muted small">${esc(it.numero_serie || '')}</span>
-        <button class="btn btn-sm" data-sug="${i}">+ Agregar</button></span>`).join('')}</div></div>` : '';
-    $$('[data-sug]').forEach(b => { b.onclick = () => agregar(sugeridos[Number(b.dataset.sug)]); });
+  // Todos los ítems en oficina, filtrables; cualquier transductor puede ir con cualquier equipo
+  const pintarDisponibles = () => {
+    const q = $('#ne-buscar').value;
+    const cat = $('#ne-cat').value;
+    visibles = disponibles().filter(it => (!enNota(it.id) || (!it.numero_serie && enNota(it.id).cantidad < it.stock.oficina))
+      && (!cat || it.categoria === cat)
+      && (!q || coincide(`${it.modelo} ${it.descripcion} ${it.numero_serie} ${it.serie_norm} ${it.marca}`, q)))
+      .sort((x, y) => (x.categoria === y.categoria ? 0 : x.categoria === 'Equipo' ? -1 : 1));
+    $('#ne-disp').innerHTML = visibles.map((it, i) => `<tr>
+      <td><b>${esc(it.modelo || it.descripcion)}</b> <span class="muted small">${esc(it.categoria)}</span><div class="sub-linea">${esc(it.descripcion)}</div></td>
+      <td class="nowrap">${esc(it.numero_serie || `${it.stock.oficina} en oficina`)}</td>
+      <td class="num"><button class="btn btn-sm" data-add="${i}">+ Agregar</button></td></tr>`).join('')
+      || '<tr><td colspan="3" class="vacio">No hay ítems disponibles con ese filtro.</td></tr>';
+    $$('[data-add]').forEach(b => { b.onclick = () => agregar(visibles[Number(b.dataset.add)]); });
   };
 
   const agregar = it => {
@@ -235,17 +245,11 @@ export function vistaFormNE(id, vista) {
     const ya = enNota(it.id);
     if (ya) { if (!it.numero_serie && ya.cantidad < it.stock.oficina) ya.cantidad++; }
     else f.lineas.push({ item_id: it.id, cantidad: 1 });
-    $('#ne-buscar').value = '';
-    pintarLineas(); pintarSugerencias();
-    $('#ne-buscar').focus();
+    pintarLineas(); pintarDisponibles();
   };
 
-  autocompletar($('#ne-buscar'), {
-    buscar: q => disponibles().filter(it => (!enNota(it.id) || !it.numero_serie)
-      && coincide(`${it.modelo} ${it.descripcion} ${it.numero_serie} ${it.serie_norm} ${it.marca}`, q)),
-    render: it => `<b>${esc(it.modelo || it.descripcion)}</b> <span class="muted small">${esc(it.categoria)} · ${esc(it.numero_serie || `${it.stock.oficina} en oficina`)}</span><div class="sub-linea">${esc(it.descripcion)}</div>`,
-    elegir: agregar,
-  });
+  $('#ne-buscar').addEventListener('input', pintarDisponibles);
+  $('#ne-cat').addEventListener('change', pintarDisponibles);
 
   autocompletar($('#ne-cli'), {
     buscar: q => datos.clientes.filter(c => coincide(`${c.nombre} ${c.contacto} ${c.ruc}`, q)),
@@ -294,6 +298,6 @@ export function vistaFormNE(id, vista) {
   });
 
   pintarLineas();
-  pintarSugerencias();
+  pintarDisponibles();
   return { conForm: true };
 }

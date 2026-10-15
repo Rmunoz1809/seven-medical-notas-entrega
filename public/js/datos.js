@@ -55,12 +55,3 @@ export async function movimientosDe(itemId) {
   return s.docs.map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (b.fecha?.toMillis?.() || 0) - (a.fecha?.toMillis?.() || 0));
 }
-
-// Modelos de equipo conocidos (para compatibilidades): clave -> nombre visible
-export function modelosEquipo() {
-  const m = new Map();
-  for (const it of datos.items) {
-    if (it.categoria === 'Equipo' && it.modelo_clave) m.set(it.modelo_clave, it.modelo);
-  }
-  return m;
-}

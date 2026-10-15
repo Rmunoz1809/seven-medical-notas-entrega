@@ -1,6 +1,6 @@
 import { llamar } from '../fb.js';
-import { datos, item, nota, movimientosDe, modelosEquipo } from '../datos.js';
-import { ESTADOS, CLAVES_STOCK, validarItem, claveModelo } from '../comun.js';
+import { datos, item, nota, movimientosDe } from '../datos.js';
+import { ESTADOS, CLAVES_STOCK, validarItem } from '../comun.js';
 import { $, $$, esc, cant, fecha, fechaHora, chip, abrirModal, toast, coincide } from '../ui.js';
 
 const filtro = { categoria: '', estado: '', modelo: '', q: '' };
@@ -56,8 +56,6 @@ export function vistaInventario(_, vista) {
 
 // ------------------------------------------------------------ Formulario de ítem
 export function formItem(it, alGuardar) {
-  const m = modelosEquipo();
-  const comp = new Set(it?.compatibles || []);
   const marcas = [...new Set(datos.items.map(i => i.marca).filter(Boolean))];
   const modelos = [...new Set(datos.items.map(i => i.modelo).filter(Boolean))];
   const cuerpo = abrirModal(it ? 'Editar ítem' : 'Nuevo ítem', `
@@ -68,11 +66,6 @@ export function formItem(it, alGuardar) {
       <label>Número de serie<input id="it-serie" value="${esc(it?.numero_serie)}" placeholder="Vacío si no tiene"></label>
       <label class="full">Descripción<input id="it-desc" value="${esc(it?.descripcion)}" placeholder="Ej. Equipo de Ultrasonido portátil / Transductor lineal"></label>
       <label>Cantidad<input id="it-cant" type="number" min="1" step="1" value="${it?.cantidad ?? 1}"><span class="ayuda">Siempre 1 si tiene serial</span></label>
-      <div class="full" id="it-comp-box">
-        <label>Equipos compatibles <span class="ayuda">(solo accesorios)</span></label>
-        <div class="sugerencias" id="it-comp">${[...m].map(([k, v]) => `<label class="check sug"><input type="checkbox" value="${esc(k)}" ${comp.has(k) ? 'checked' : ''}>${esc(v)}</label>`).join('') || '<span class="muted small">Aún no hay equipos en el inventario.</span>'}</div>
-        <input id="it-comp-otro" style="margin-top:8px" placeholder="Otros modelos, separados por coma" value="${esc([...comp].filter(k => !m.has(k)).join(', '))}">
-      </div>
       <label class="full">Notas<textarea id="it-notas">${esc(it?.notas)}</textarea></label>
     </div>
     <datalist id="dl-marcas">${marcas.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
@@ -94,11 +87,10 @@ export function formItem(it, alGuardar) {
     categoria: $('#it-cat').value, marca: $('#it-marca').value, modelo: $('#it-modelo').value,
     numero_serie: $('#it-serie').value, descripcion: $('#it-desc').value,
     cantidad: Number($('#it-cant').value || 1), notas: $('#it-notas').value,
-    compatibles: [...$$('#it-comp input:checked').map(c => c.value), ...$('#it-comp-otro').value.split(',').map(claveModelo).filter(Boolean)],
+    compatibles: it?.compatibles || [],
   });
   const ajustar = () => {
     const acc = $('#it-cat').value === 'Accesorio';
-    $('#it-comp-box').hidden = !acc;
     const conSerie = !!$('#it-serie').value.trim() || !acc;
     $('#it-cant').disabled = conSerie;
     if (conSerie) $('#it-cant').value = 1;
@@ -115,7 +107,6 @@ export function vistaItem(id, vista) {
   $('#titulo').textContent = `${it.modelo || it.descripcion}${it.numero_serie ? ' · ' + it.numero_serie : ''}`;
   $('#acciones').innerHTML = '<button class="btn btn-primary" id="btn-editar">Editar</button>';
   $('#btn-editar').onclick = () => formItem(it);
-  const m = modelosEquipo();
   const dato = (e, v) => `<div class="dato"><div class="etq">${e}</div><div class="val">${v || '—'}</div></div>`;
   const abiertas = (it.ne_abiertas || []).map(nota).filter(Boolean);
   vista.innerHTML = `
@@ -128,7 +119,6 @@ export function vistaItem(id, vista) {
       ${dato('Descripción', esc(it.descripcion))}
       ${dato('Cantidad', it.cantidad)}
       ${it.cantidad > 1 ? dato('Reparto', CLAVES_STOCK.filter(k => it.stock?.[k]).map(k => `${it.stock[k]} ${esc(ESTADOS[k].toLowerCase())}`).join('<br>')) : ''}
-      ${it.categoria === 'Accesorio' ? dato('Compatible con', esc((it.compatibles || []).map(k => m.get(k) || k).join(', '))) : ''}
       ${dato('Afuera en', abiertas.map(n => `<a href="#/ne/${n.id}">${esc(n.numero)}</a> · ${esc(n.cliente?.nombre)}`).join('<br>'))}
       ${it.notas ? dato('Notas', esc(it.notas)) : ''}
     </div></div>
